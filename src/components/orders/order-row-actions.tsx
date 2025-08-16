@@ -13,15 +13,17 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import type { Order } from "@/lib/types";
 import { confirmOrder, cancelOrder, assignAwb } from "@/lib/actions/order";
-import { BrainCircuit, Loader2, Printer, Ship, X, Check, MoreHorizontal } from 'lucide-react';
+import { BrainCircuit, Loader2, Printer, Ship, X, Check, MoreHorizontal, Eye } from 'lucide-react';
 import CarrierSuggestionModal from './carrier-suggestion-modal';
+import OrderDetailsModal from './order-details-modal';
 
 export const OrderRowActions = ({ order }: { order: Order }) => {
   const { toast } = useToast();
   const [isConfirming, startConfirmTransition] = useTransition();
   const [isCancelling, startCancelTransition] = useTransition();
   const [isAssigning, startAssignTransition] = useTransition();
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCarrierModalOpen, setIsCarrierModalOpen] = useState(false);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
 
   const handleConfirm = () => {
     startConfirmTransition(async () => {
@@ -58,7 +60,8 @@ export const OrderRowActions = ({ order }: { order: Order }) => {
 
   return (
     <>
-      <CarrierSuggestionModal order={order} isOpen={isModalOpen} onOpenChange={setIsModalOpen} />
+      <CarrierSuggestionModal order={order} isOpen={isCarrierModalOpen} onOpenChange={setIsCarrierModalOpen} />
+      <OrderDetailsModal order={order} isOpen={isDetailsModalOpen} onOpenChange={setIsDetailsModalOpen} />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0">
@@ -68,6 +71,10 @@ export const OrderRowActions = ({ order }: { order: Order }) => {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => setIsDetailsModalOpen(true)}>
+            <Eye className="mr-2 h-4 w-4" />
+            View Details
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           {order.appStatus === 'NEW' && (
             <>
@@ -87,7 +94,7 @@ export const OrderRowActions = ({ order }: { order: Order }) => {
                 {isAssigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Ship className="mr-2 h-4 w-4" />}
                 Assign AWB
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsModalOpen(true)}>
+              <DropdownMenuItem onClick={() => setIsCarrierModalOpen(true)}>
                 <BrainCircuit className="mr-2 h-4 w-4" />
                 Suggest Carrier
               </DropdownMenuItem>
