@@ -1,7 +1,11 @@
 # Settings to manage and configure a Firebase App Hosting backend.
 # https://firebase.google.com/docs/app-hosting/configure
 
-runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
+backend:
+  runConfig:
+    # Increase this if you want autoscaling.
+    maxInstances: 1
+
+  environment:
+    variables:
+      SHOPIFY_WEBHOOK_SECRET: "0abb522abcc1622347b3b4443df4e901cd90e33a10b9883f41ee9b36683f158b"
