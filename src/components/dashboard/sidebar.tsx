@@ -11,32 +11,39 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarFooter,
+  useSidebar,
 } from '@/components/ui/sidebar';
+import { SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 
 const AppSidebar = () => {
   const pathname = usePathname();
+  const { isMobile } = useSidebar();
 
   const menuItems = [
     { href: '/dashboard/orders', label: 'Orders', icon: ShoppingCart },
     { href: '/dashboard/products', label: 'Products', icon: Package },
   ];
+  
+  const Header = isMobile ? SheetHeader : SidebarHeader;
+  const Title = isMobile ? SheetTitle : 'h2';
+
 
   return (
     <Sidebar>
-      <SidebarHeader>
+      <Header>
         <div className="flex items-center gap-2">
           <Truck className="size-6 text-primary" />
-          <h2
+          <Title
             className={cn(
               'text-lg font-semibold text-foreground',
               'group-data-[collapsible=icon]:hidden'
             )}
           >
             SyncFlow Pro
-          </h2>
+          </Title>
         </div>
-      </SidebarHeader>
+      </Header>
       <SidebarContent>
         <SidebarMenu>
           {menuItems.map((item) => (
@@ -63,3 +70,5 @@ const AppSidebar = () => {
 };
 
 export default AppSidebar;
+
+    
