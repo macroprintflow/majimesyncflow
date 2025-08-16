@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import ProductActions from "./product-actions";
 import { useState } from "react";
 import ProductForm from "./product-form";
-import { seedData } from "@/lib/actions/product";
 import { useToast } from "@/hooks/use-toast";
 
 const ProductTable = () => {
@@ -36,15 +35,6 @@ const ProductTable = () => {
     setIsFormOpen(true);
   };
 
-  const handleSeed = async () => {
-    const res = await seedData();
-    if(res.success) {
-        toast({ title: "Success", description: "Sample data added successfully." });
-    } else {
-        toast({ title: "Error", description: res.error, variant: 'destructive' });
-    }
-  }
-
   return (
     <>
       <ProductForm 
@@ -56,7 +46,6 @@ const ProductTable = () => {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Your Products</CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={handleSeed}>Seed Data</Button>
             <Button onClick={handleAddNew}>Add New Product</Button>
           </div>
         </CardHeader>

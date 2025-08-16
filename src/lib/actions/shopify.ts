@@ -1,6 +1,6 @@
 'use server';
 
-import { writeBatch, collection, getDocs, query, where, serverTimestamp } from 'firebase/firestore';
+import { writeBatch, collection, getDocs, query, where, serverTimestamp, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/firebase';
 import shopify from '@/lib/shopify';
 import type { Order } from '@/lib/types';
