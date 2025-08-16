@@ -41,11 +41,11 @@ function formatDate(ts: any) {
   return "—";
 }
 
-// Prefer Shopify human order number (order.name like "#1001"),
+// Prefer Shopify human order number (order.name like "#OWR-MT11008"),
 // else fall back to the numeric part of shopifyId (e.g., shp-1234567890 → #1234567890),
 // else the Firestore doc id.
 function getDisplayOrderNumber(order: Order) {
-  if ((order as any).name) return (order as any).name as string;
+  if (order.name) return order.name;
   if (order.shopifyId) {
     const raw = order.shopifyId.replace("shp-", "");
     const cleaned = raw.split("?")[0].split("/").pop() || raw;
@@ -96,7 +96,7 @@ const OrderTable = ({
 
             // Prefer Shopify's timestamp fields if present; fallback to legacy createdAt
             const displayTimestamp =
-              (order as any).shopifyCreatedAt ?? (order as any).createdAt;
+              order.createdAt;
 
             const currency = order?.totals?.currency || "INR";
             const totalAmount = Number(order?.totals?.grandTotal || 0);

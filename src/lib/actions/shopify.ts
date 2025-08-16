@@ -66,6 +66,7 @@ export async function syncShopifyOrders() {
 
       const newOrder: Omit<Order, 'id'> & { createdAt: any, updatedAt: any } = {
         shopifyId,
+        name: order.name, // <-- Save the human-readable order number
         financialStatus: (order.financial_status as any) || 'pending',
         fulfillmentStatus: (order.fulfillment_status as any) || 'unfulfilled',
         appStatus: 'NEW',

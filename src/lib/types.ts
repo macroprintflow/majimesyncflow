@@ -49,6 +49,7 @@ export type OrderAppStatus = 'NEW' | 'CONFIRMED' | 'CANCELLED' | 'READY_TO_DISPA
 export interface Order {
   id: string;
   shopifyId: string;
+  name: string; // The human-readable order number (e.g., #1001 or #OWR-MT11008)
   financialStatus: "paid" | "pending" | "refunded";
   fulfillmentStatus: "unfulfilled" | "fulfilled" | "partially_fulfilled";
   appStatus: OrderAppStatus;
@@ -61,6 +62,7 @@ export interface Order {
   carrierErrors: CarrierError[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  shopifyCreatedAt?: Timestamp; // Legacy support
 }
 
 export interface Variant {
