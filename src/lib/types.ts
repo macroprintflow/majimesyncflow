@@ -92,3 +92,8 @@ export interface Product {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+export interface BulkActionResults {
+    success: number;
+    error: number;
+}

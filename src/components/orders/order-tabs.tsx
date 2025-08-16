@@ -17,8 +17,11 @@ import { Button } from "@/components/ui/button";
 import { OrderRowActions } from "./order-row-actions";
 import { format } from "date-fns";
 import type { Timestamp } from "firebase/firestore";
-import { useState, useMemo } from "react";
-import { ArrowUpDown } from "lucide-react";
+import { useState, useMemo, useTransition } from "react";
+import { ArrowUpDown, Check, Loader2, X } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/hooks/use-toast";
+import { bulkCancelOrders, bulkConfirmOrders } from "@/lib/actions/order";
 
 const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "New Orders", status: "NEW" },
@@ -69,8 +72,13 @@ const OrderTable = ({
   orders: Order[];
   status: OrderAppStatus;
 }) => {
+  const { toast } = useToast();
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'createdAt', direction: 'desc' });
-  const filteredOrders = orders.filter((order) => order.appStatus === status);
+  const [selectedRows, setSelectedRows] = useState<Record<string, boolean>>({});
+  const [isBulkConfirming, startBulkConfirmTransition] = useTransition();
+  const [isBulkCancelling, startBulkCancelTransition] = useTransition();
+
+  const filteredOrders = useMemo(() => orders.filter((order) => order.appStatus === status), [orders, status]);
 
   const requestSort = (key: SortConfig['key']) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -119,7 +127,55 @@ const OrderTable = ({
     return sortableItems;
   }, [filteredOrders, sortConfig]);
 
-  if (sortedOrders.length === 0) {
+  const handleSelectAll = (checked: boolean) => {
+    const newSelectedRows: Record<string, boolean> = {};
+    if (checked) {
+      sortedOrders.forEach(order => {
+        newSelectedRows[order.id] = true;
+      });
+    }
+    setSelectedRows(newSelectedRows);
+  };
+
+  const handleSelectRow = (orderId: string, checked: boolean) => {
+    setSelectedRows(prev => ({
+      ...prev,
+      [orderId]: checked,
+    }));
+  };
+  
+  const selectedCount = Object.values(selectedRows).filter(Boolean).length;
+  const isAllSelected = sortedOrders.length > 0 && selectedCount === sortedOrders.length;
+
+  const handleBulkConfirm = () => {
+    const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
+    startBulkConfirmTransition(async () => {
+        const result = await bulkConfirmOrders(selectedIds);
+        if (result.success > 0) {
+            toast({ title: "Success", description: `${result.success} orders confirmed.` });
+        }
+        if (result.error > 0) {
+            toast({ variant: "destructive", title: "Error", description: `${result.error} orders failed to confirm.` });
+        }
+        setSelectedRows({});
+    });
+  };
+  
+  const handleBulkCancel = () => {
+    const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
+    startBulkCancelTransition(async () => {
+        const result = await bulkCancelOrders(selectedIds);
+        if (result.success > 0) {
+            toast({ title: "Success", description: `${result.success} orders cancelled.` });
+        }
+        if (result.error > 0) {
+            toast({ variant: "destructive", title: "Error", description: `${result.error} orders failed to cancel.` });
+        }
+        setSelectedRows({});
+    });
+  }
+
+  if (filteredOrders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center mt-4">
         <p className="text-sm text-muted-foreground">No orders in this stage.</p>
@@ -129,10 +185,31 @@ const OrderTable = ({
 
   return (
     <>
+      {selectedCount > 0 && status === 'NEW' && (
+        <div className="my-4 flex items-center justify-between rounded-lg border bg-card p-3 shadow-sm">
+            <span className="text-sm font-medium">{selectedCount} order(s) selected</span>
+            <div className="flex gap-2">
+                <Button onClick={handleBulkConfirm} disabled={isBulkConfirming} size="sm">
+                    {isBulkConfirming ? <Loader2 className="animate-spin" /> : <Check />} Confirm Selected
+                </Button>
+                <Button onClick={handleBulkCancel} disabled={isBulkCancelling} variant="destructive" size="sm">
+                    {isBulkCancelling ? <Loader2 className="animate-spin" /> : <X />} Cancel Selected
+                </Button>
+            </div>
+        </div>
+      )}
       <div className="rounded-lg border mt-4">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                    checked={isAllSelected}
+                    onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
+                    aria-label="Select all"
+                    disabled={status !== 'NEW'}
+                />
+              </TableHead>
               <TableHead>{getSortableHeader('Order', 'name')}</TableHead>
               <TableHead>{getSortableHeader('Customer', 'customer.name')}</TableHead>
               <TableHead>{getSortableHeader('Date (Shopify)', 'createdAt')}</TableHead>
@@ -156,7 +233,15 @@ const OrderTable = ({
               const totalAmount = Number(order?.totals?.grandTotal || 0);
 
               return (
-                <TableRow key={order.id}>
+                <TableRow key={order.id} data-state={selectedRows[order.id] && "selected"}>
+                  <TableCell>
+                    <Checkbox
+                        checked={!!selectedRows[order.id]}
+                        onCheckedChange={(checked) => handleSelectRow(order.id, Boolean(checked))}
+                        aria-label={`Select order ${humanNumber}`}
+                        disabled={status !== 'NEW'}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{humanNumber}</TableCell>
                   <TableCell>{order.customer?.name || "—"}</TableCell>
                   <TableCell>{formatDate(displayTimestamp)}</TableCell>

@@ -1,9 +1,10 @@
 "use server";
 
-import { doc, updateDoc, serverTimestamp, arrayUnion } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp, arrayUnion, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase/firebase";
 import { suggestCarrier, type SuggestCarrierInput } from "@/ai/flows/intelligent-carrier-selection";
 import { revalidatePath } from "next/cache";
+import type { BulkActionResults } from "@/lib/types";
 
 // Mock API call to Shopify
 async function mockCancelShopifyOrder(orderId: string) {
@@ -128,4 +129,51 @@ export async function suggestCarrierAction(input: SuggestCarrierInput) {
     console.error("Error suggesting carrier:", error);
     return { success: false, error: "AI failed to suggest a carrier." };
   }
+}
+
+export async function bulkConfirmOrders(orderIds: string[]): Promise<BulkActionResults> {
+    const results: BulkActionResults = { success: 0, error: 0 };
+    const batch = writeBatch(db);
+
+    for (const orderId of orderIds) {
+        try {
+            const orderRef = doc(db, "orders", orderId);
+            batch.update(orderRef, {
+                appStatus: "CONFIRMED",
+                updatedAt: serverTimestamp(),
+            });
+            results.success++;
+        } catch (error) {
+            console.error(`Error confirming order ${orderId}:`, error);
+            results.error++;
+        }
+    }
+    
+    try {
+        await batch.commit();
+        revalidatePath("/dashboard/orders");
+    } catch (error) {
+        console.error("Error committing bulk confirm batch:", error);
+        // This is tricky, the entire batch fails. Let's return a total failure.
+        return { success: 0, error: orderIds.length };
+    }
+    
+    return results;
+}
+
+export async function bulkCancelOrders(orderIds: string[]): Promise<BulkActionResults> {
+    const results: BulkActionResults = { success: 0, error: 0 };
+    
+    // We can't use a single batch here because we need to await the Shopify API call for each order.
+    for (const orderId of orderIds) {
+        const result = await cancelOrder(orderId);
+        if (result.success) {
+            results.success++;
+        } else {
+            results.error++;
+        }
+    }
+    
+    revalidatePath("/dashboard/orders");
+    return results;
 }
