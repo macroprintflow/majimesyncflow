@@ -2,8 +2,8 @@
 'use server';
 
 import {
-  writeBatch, collection, getDoc, doc,
-  serverTimestamp, Timestamp
+  writeBatch, collection, getDocs, doc,
+  serverTimestamp, Timestamp, query
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/firebase';
 import shopify from '@/lib/shopify';
@@ -12,11 +12,24 @@ import { revalidatePath } from 'next/cache';
 
 export async function clearAllOrders() {
   try {
-    // This is a placeholder for a more robust batch delete
-    // For now, this is NOT implemented to prevent accidental data loss.
-    // In a real scenario, you'd use a Firebase Extension or a Cloud Function for bulk deletes.
-    console.log("Clearing all orders... (mock action)");
-    // To implement, you would query all documents and delete them in batches.
+    console.log("Clearing all orders...");
+    const ordersCol = collection(db, 'orders');
+    const q = query(ordersCol);
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      console.log("No orders to clear.");
+      return { success: true };
+    }
+
+    const batch = writeBatch(db);
+    querySnapshot.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+
+    await batch.commit();
+    console.log(`${querySnapshot.size} orders cleared successfully.`);
+    revalidatePath('/dashboard/orders');
     return { success: true };
   } catch (error: any) {
     console.error('Error clearing orders:', error);
