@@ -21,11 +21,14 @@ export async function syncShopifyOrders() {
     const ordersCol = collection(db, 'orders');
     const existingShopifyIds = new Set<string>();
 
+    // The shopify-api-node library returns a gid, so we extract the ID from it
+    const getNumericId = (gid: string) => gid.split('/').pop() || '';
+
     // Firestore 'in' query has a limit of 30 values. We need to batch the check.
-    const shopifyOrderIds = shopifyOrders.map(o => `shp-${o.id}`);
+    const shopifyOrderGids = shopifyOrders.map(o => `shp-${getNumericId(String(o.id))}`);
     const idChunks = [];
-    for (let i = 0; i < shopifyOrderIds.length; i += 30) {
-      idChunks.push(shopifyOrderIds.slice(i, i + 30));
+    for (let i = 0; i < shopifyOrderGids.length; i += 30) {
+      idChunks.push(shopifyOrderGids.slice(i, i + 30));
     }
 
     // Query for existing orders in chunks
@@ -43,7 +46,8 @@ export async function syncShopifyOrders() {
     
     let syncedCount = 0;
     shopifyOrders.forEach(order => {
-      const shopifyId = `shp-${order.id}`;
+      const numericId = getNumericId(String(order.id));
+      const shopifyId = `shp-${numericId}`;
 
       if (existingShopifyIds.has(shopifyId)) {
         return; // Skip if order already exists
@@ -51,6 +55,7 @@ export async function syncShopifyOrders() {
 
       // Convert Shopify's ISO date string to a Firestore Timestamp
       const createdAtTimestamp = order.created_at ? Timestamp.fromDate(new Date(order.created_at)) : serverTimestamp();
+      const updatedAtTimestamp = order.updated_at ? Timestamp.fromDate(new Date(order.updated_at)) : serverTimestamp();
 
       const newOrder: Omit<Order, 'id' | 'createdAt' | 'updatedAt'> = {
         shopifyId: shopifyId,
@@ -74,7 +79,7 @@ export async function syncShopifyOrders() {
           sku: li.sku || '',
           quantity: li.quantity,
           price: parseFloat(li.price),
-          shopifyLineItemId: String(li.id),
+          shopifyLineItemId: getNumericId(String(li.id)),
         })),
         totals: {
           subtotal: parseFloat(order.subtotal_price || '0'),
@@ -93,7 +98,7 @@ export async function syncShopifyOrders() {
       batch.set(newOrderRef, {
         ...newOrder,
         createdAt: createdAtTimestamp,
-        updatedAt: serverTimestamp(),
+        updatedAt: updatedAtTimestamp,
       });
       syncedCount++;
     });

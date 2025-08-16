@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { OrderRowActions } from "./order-row-actions";
 import { format } from "date-fns";
+import type { Timestamp } from "firebase/firestore";
 
 const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "New Orders", status: "NEW" },
@@ -32,6 +33,14 @@ const OrderTable = ({ orders, status }: { orders: Order[]; status: OrderAppStatu
       </div>
     );
   }
+  
+  const formatDate = (timestamp: Timestamp) => {
+    if (timestamp && typeof timestamp.toDate === 'function') {
+      return format(timestamp.toDate(), 'PPpp');
+    }
+    // Fallback for cases where timestamp might not be a valid object
+    return 'Invalid date';
+  };
 
   return (
     <div className="rounded-lg border mt-4">
@@ -49,9 +58,9 @@ const OrderTable = ({ orders, status }: { orders: Order[]; status: OrderAppStatu
         <TableBody>
           {filteredOrders.map(order => (
             <TableRow key={order.id}>
-              <TableCell className="font-medium">#{order.shopifyId.replace('shp-', '')}</TableCell>
+              <TableCell className="font-medium">#{order.shopifyId.replace('shp-','').split('?')[0].split('/').pop()}</TableCell>
               <TableCell>{order.customer.name}</TableCell>
-              <TableCell>{format(order.createdAt.toDate(), 'PPpp')}</TableCell>
+              <TableCell>{formatDate(order.createdAt)}</TableCell>
               <TableCell>{order.lineItems.reduce((acc, item) => acc + item.quantity, 0)}</TableCell>
               <TableCell className="text-right font-semibold">
                 {new Intl.NumberFormat('en-IN', { style: 'currency', currency: order.totals.currency }).format(order.totals.grandTotal)}
