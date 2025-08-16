@@ -21,12 +21,23 @@ export async function syncShopifyOrders() {
     const ordersCol = collection(db, 'orders');
     const existingShopifyIds = new Set<string>();
 
-    // Check for existing orders to avoid duplicates
-    const q = query(ordersCol, where('shopifyId', 'in', shopifyOrders.map(o => `shp-${o.id}`)));
-    const querySnapshot = await getDocs(q);
-    querySnapshot.forEach(doc => {
-      existingShopifyIds.add(doc.data().shopifyId);
-    });
+    // Firestore 'in' query has a limit of 30 values. We need to batch the check.
+    const shopifyOrderIds = shopifyOrders.map(o => `shp-${o.id}`);
+    const idChunks = [];
+    for (let i = 0; i < shopifyOrderIds.length; i += 30) {
+      idChunks.push(shopifyOrderIds.slice(i, i + 30));
+    }
+
+    // Query for existing orders in chunks
+    for (const chunk of idChunks) {
+      if (chunk.length > 0) {
+        const q = query(ordersCol, where('shopifyId', 'in', chunk));
+        const querySnapshot = await getDocs(q);
+        querySnapshot.forEach(doc => {
+          existingShopifyIds.add(doc.data().shopifyId);
+        });
+      }
+    }
 
     console.log(`${existingShopifyIds.size} orders already exist in Firestore. Syncing new ones...`);
     
