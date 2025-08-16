@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/firebase';
 import shopify from '@/lib/shopify';
-import type { Order } from '@/lib/types';
+import type { Order, OrderAppStatus } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 
 export async function clearAllOrders() {
@@ -22,6 +22,8 @@ export async function clearAllOrders() {
       return { success: true };
     }
 
+    // Firestore allows a maximum of 500 operations in a single batch.
+    // If you expect more than 500 orders, you'll need to chunk this.
     const batch = writeBatch(db);
     querySnapshot.forEach(doc => {
       batch.delete(doc.ref);
@@ -40,7 +42,7 @@ export async function clearAllOrders() {
 export async function syncShopifyOrders() {
   try {
     console.log('Fetching latest orders from Shopify...');
-    const shopifyOrders = await shopify.order.list({ limit: 50 });
+    const shopifyOrders = await shopify.order.list({ limit: 50, status: 'any' });
     console.log(`Found ${shopifyOrders.length} orders in Shopify.`);
 
     if (!shopifyOrders?.length) {
@@ -51,7 +53,9 @@ export async function syncShopifyOrders() {
     let upserts = 0;
 
     for (const order of shopifyOrders) {
-      await processAndSaveOrder(order, batch);
+      const isCancelled = order.cancelled_at !== null;
+      const status: OrderAppStatus = isCancelled ? 'CANCELLED' : 'NEW';
+      await processAndSaveOrder(order, batch, status);
       upserts++;
     }
 
@@ -82,24 +86,28 @@ const getNumericId = (idLike: string | number) => {
  * This can be used for both bulk sync and webhooks.
  * @param order - The Shopify order object.
  * @param batch - The Firestore write batch to add the operation to.
+ * @param forceStatus - Optionally force an app status, useful for webhooks like 'orders/cancelled'.
  */
-export async function processAndSaveOrder(order: any, batch?: import('firebase/firestore').WriteBatch) {
+export async function processAndSaveOrder(order: any, batch?: import('firebase/firestore').WriteBatch, forceStatus?: OrderAppStatus) {
     const ordersCol = collection(db, 'orders');
     const numericId = getNumericId(order.id);
     const shopifyId = `shp-${numericId}`;
     const createdAtTimestamp = order.created_at ? Timestamp.fromDate(new Date(order.created_at)) : serverTimestamp();
     const updatedAtTimestamp = order.updated_at ? Timestamp.fromDate(new Date(order.updated_at)) : serverTimestamp();
 
+    const isCancelled = order.cancelled_at !== null;
+    const initialStatus: OrderAppStatus = isCancelled ? 'CANCELLED' : 'NEW';
+
     const newOrder: Omit<Order, 'id'> & { createdAt: any, updatedAt: any } = {
       shopifyId,
       name: order.name,
       financialStatus: (order.financial_status as any) || 'pending',
       fulfillmentStatus: (order.fulfillment_status as any) || 'unfulfilled',
-      appStatus: 'NEW',
+      appStatus: forceStatus || initialStatus,
       customer: {
         name: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim(),
         email: order.customer?.email || '',
-        phone: order.customer?.phone || '',
+        phone: order.customer?.phone || order.shipping_address?.phone || '',
       },
       shippingAddress: {
         line1: order.shipping_address?.address1 || '',
@@ -133,7 +141,15 @@ export async function processAndSaveOrder(order: any, batch?: import('firebase/f
     const orderRef = doc(ordersCol, shopifyId);
 
     const currentBatch = batch || writeBatch(db);
+    // Use merge:true to update existing orders without overwriting fields like carrier info
     currentBatch.set(orderRef, newOrder, { merge: true });
+
+    // If a status is forced (e.g., cancellation), we need to ensure it's explicitly updated
+    // because merge might not overwrite it if the rest of the object is the same.
+    if (forceStatus) {
+        currentBatch.update(orderRef, { appStatus: forceStatus, updatedAt: serverTimestamp() });
+    }
+
 
     // If no batch was provided, we commit it ourselves.
     if (!batch) {
