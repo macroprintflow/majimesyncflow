@@ -1,6 +1,6 @@
 "use server";
 
-import { collection, writeBatch, doc, serverTimestamp, deleteDoc } from "firebase/firestore";
+import { collection, writeBatch, doc, serverTimestamp, deleteDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/firebase";
 import type { Product, Order } from "@/lib/types";
 import { revalidatePath } from "next/cache";
@@ -27,14 +27,17 @@ export async function upsertProduct(productData: Omit<Product, 'id' | 'createdAt
       finalData.createdAt = serverTimestamp();
     }
     
-    await writeBatch(db).set(productRef, finalData, { merge: true }).commit();
+    const batch = writeBatch(db);
+    batch.set(productRef, finalData, { merge: true });
 
     if (productData.source === 'app') {
       const shopifyResult = await mockPushProductToShopify(productData as Product);
       if (shopifyResult.success) {
-        await updateDoc(productRef, { shopifyId: shopifyResult.shopifyId });
+        batch.update(productRef, { shopifyId: shopifyResult.shopifyId });
       }
     }
+    
+    await batch.commit();
 
     revalidatePath("/dashboard/products");
     return { success: true, id: productRef.id };
@@ -63,7 +66,7 @@ export async function seedData() {
   const products: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>[] = [
     { source: 'app', title: 'Ergonomic Office Chair', description: 'High-back ergonomic chair with lumbar support.', status: 'active', variants: [{ sku: 'CHR-BLK-01', price: 15000, inventoryQty: 50, optionValues: 'Black' }], images: [], tags: ['office', 'furniture'] },
     { source: 'app', title: 'Wireless Mechanical Keyboard', description: '75% layout with hot-swappable switches.', status: 'active', variants: [{ sku: 'KBD-WRL-01', price: 8500, inventoryQty: 120, optionValues: 'White' }], images: [], tags: ['tech', 'keyboard'] },
-    { source: 'draft', title: 'UltraWide 4K Monitor', description: '34-inch curved monitor for productivity.', status: 'draft', variants: [{ sku: 'MON-UW-4K-01', price: 45000, inventoryQty: 30, optionValues: 'Standard' }], images: [], tags: ['tech', 'monitor'] },
+    { source: 'app', title: 'UltraWide 4K Monitor', description: '34-inch curved monitor for productivity.', status: 'draft', variants: [{ sku: 'MON-UW-4K-01', price: 45000, inventoryQty: 30, optionValues: 'Standard' }], images: [], tags: ['tech', 'monitor'] },
   ];
 
   products.forEach(product => {
