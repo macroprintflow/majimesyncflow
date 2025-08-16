@@ -1,79 +1,155 @@
-import { NextResponse } from 'next/server';
-import crypto from 'crypto';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase/firebase';
-import { processAndSaveOrder } from '@/lib/actions/shopify';
+// src/app/api/webhooks/shopify/route.ts
+import crypto from "crypto";
+import * as admin from "firebase-admin";
+
+// Ensure Node runtime (not Edge) and allow dynamic
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// Initialize Admin SDK once (App Hosting uses ADC, so no creds file needed)
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+const db = admin.firestore();
 
 const SHOPIFY_WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET;
 
+// Constant-time compare
+function safeEqual(a: string, b: string) {
+  const A = Buffer.from(a, "utf8");
+  const B = Buffer.from(b, "utf8");
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
+}
+
+function getNumericId(idLike: string | number) {
+  const s = String(idLike);
+  return s.includes("/") ? s.split("/").pop()! : s;
+}
+
 export async function POST(req: Request) {
   if (!SHOPIFY_WEBHOOK_SECRET) {
-    console.error('Shopify webhook secret is not set.');
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("SHOPIFY_WEBHOOK_SECRET is not set");
+    return new Response("Server not configured", { status: 500 });
   }
 
-  const hmac = req.headers.get('x-shopify-hmac-sha256');
-  const shop = req.headers.get('x-shopify-shop-domain');
-  const topic = req.headers.get('x-shopify-topic');
-  const webhookId = req.headers.get('x-shopify-webhook-id');
+  // Required headers
+  const hmac = req.headers.get("x-shopify-hmac-sha256") || "";
+  const topic = req.headers.get("x-shopify-topic") || "";
+  const shopDomain = req.headers.get("x-shopify-shop-domain") || "";
+  const webhookId = req.headers.get("x-shopify-webhook-id") || "";
 
-  if (!hmac || !shop || !topic || !webhookId) {
-    return NextResponse.json({ error: 'Missing required Shopify headers' }, { status: 400 });
-  }
-  
-  const rawBody = await req.text();
-
-  const generatedHash = crypto
-    .createHmac('sha256', SHOPIFY_WEBHOOK_SECRET)
-    .update(rawBody, 'utf8')
-    .digest('base64');
-
-  if (generatedHash !== hmac) {
-    console.warn('⚠️ Webhook received with invalid signature. Shop:', shop);
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+  if (!hmac || !topic || !shopDomain || !webhookId) {
+    return new Response("Missing Shopify headers", { status: 400 });
   }
 
-  // Idempotency check: Ensure we haven't processed this webhook before
-  const webhookRef = doc(db, 'processedWebhooks', webhookId);
+  // IMPORTANT: read RAW body and compute HMAC on it
+  const raw = await req.text();
+  const digest = crypto.createHmac("sha256", SHOPIFY_WEBHOOK_SECRET).update(raw).digest("base64");
+  if (!safeEqual(hmac, digest)) {
+    console.warn("Invalid HMAC for webhook from", shopDomain);
+    return new Response("Invalid signature", { status: 401 });
+  }
+
+  // Parse JSON only after verifying signature
+  let payload: any;
   try {
-    const webhookDoc = await getDoc(webhookRef);
-    if (webhookDoc.exists()) {
-      console.log(`Webhook ${webhookId} already processed. Skipping.`);
-      return NextResponse.json({ message: 'Webhook already processed' }, { status: 200 });
-    }
-  } catch (dbError) {
-      console.error("Error checking for webhook idempotency:", dbError);
-      // Decide if you want to proceed or return an error.
-      // For now, we'll log and continue, but in production you might want to fail here.
+    payload = JSON.parse(raw);
+  } catch {
+    return new Response("Bad JSON", { status: 400 });
   }
 
+  // Idempotency: skip if already processed
+  const evtRef = db.collection("processedWebhooks").doc(webhookId);
+  const seen = await evtRef.get();
+  if (seen.exists) {
+    return new Response("OK", { status: 200 });
+  }
 
+  // Minimal routing
   try {
-    const payload = JSON.parse(rawBody);
-    
-    console.log(`Received webhook topic: ${topic} for order ${payload.name} from ${shop}`);
-    
     switch (topic) {
-      case 'orders/create':
-      case 'orders/updated':
-        await processAndSaveOrder(payload);
-        break;
-      case 'orders/cancelled':
-        // For cancellations, we just need to update the status.
-        await processAndSaveOrder(payload, undefined, 'CANCELLED');
+      case "orders/create":
+      case "orders/updated":
+      case "orders/cancelled":
+        await upsertOrderFromShopifyPayload(payload, topic === "orders/cancelled" ? "CANCELLED" : undefined);
         break;
       default:
-        console.log(`Unhandled webhook topic: ${topic}`);
+        // Unhandled topic is fine—still ack 200
+        break;
     }
 
-    // Mark webhook as processed
-    await setDoc(webhookRef, { processedAt: serverTimestamp(), topic: topic });
-    
-    return NextResponse.json({ message: 'Webhook received and processed' }, { status: 200 });
+    // Mark processed (idempotency)
+    await evtRef.set({
+      topic,
+      shopDomain,
+      processedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-  } catch (error) {
-    console.error('Error processing Shopify webhook:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return NextResponse.json({ error: `Webhook processing failed: ${errorMessage}` }, { status: 500 });
+    // Acknowledge quickly (<5s)
+    return new Response("OK", { status: 200 });
+  } catch (err) {
+    console.error("Webhook processing error:", err);
+    // Still return 200 so Shopify doesn't disable the webhook; investigate logs
+    return new Response("OK", { status: 200 });
   }
+}
+
+async function upsertOrderFromShopifyPayload(order: any, cancelledStatus?: "CANCELLED") {
+  const numericId = getNumericId(order.id);
+  const docId = `shp-${numericId}`;
+  const orderRef = db.collection("orders").doc(docId);
+
+  const createdStr = order.created_at ?? order.createdAt;
+  const updatedStr = order.updated_at ?? order.updatedAt;
+
+  const shopifyCreatedAt = createdStr
+    ? admin.firestore.Timestamp.fromDate(new Date(createdStr))
+    : admin.firestore.FieldValue.serverTimestamp();
+
+  const shopifyUpdatedAt = updatedStr
+    ? admin.firestore.Timestamp.fromDate(new Date(updatedStr))
+    : admin.firestore.FieldValue.serverTimestamp();
+
+  const data = {
+    shopifyId: docId,
+    name: order.name ?? "", // Shopify human order number like "#1001"
+    financialStatus: order.financial_status ?? "pending",
+    fulfillmentStatus: order.fulfillment_status ?? "unfulfilled",
+    appStatus: cancelledStatus ?? "NEW",
+    customer: {
+      name: `${order.customer?.first_name || ""} ${order.customer?.last_name || ""}`.trim(),
+      email: order.customer?.email || "",
+      phone: order.customer?.phone || "",
+    },
+    shippingAddress: {
+      line1: order.shipping_address?.address1 || "",
+      city: order.shipping_address?.city || "",
+      state: order.shipping_address?.province || "",
+      pincode: order.shipping_address?.zip || "",
+      country: order.shipping_address?.country || "",
+    },
+    lineItems: (order.line_items || []).map((li: any) => ({
+      title: li.title,
+      sku: li.sku || "",
+      quantity: li.quantity,
+      price: parseFloat(li.price),
+      shopifyLineItemId: getNumericId(li.id),
+    })),
+    totals: {
+      subtotal: parseFloat(order.subtotal_price || "0"),
+      shipping: parseFloat(order.total_shipping_price_set?.shop_money?.amount || "0"),
+      tax: parseFloat(order.total_tax || "0"),
+      discount: parseFloat(order.total_discounts || "0"),
+      grandTotal: parseFloat(order.total_price || "0"),
+      currency: order.currency || "INR",
+    },
+    carrier: null,
+    awb: { number: null, labelUrl: null },
+    carrierErrors: [],
+    shopifyCreatedAt,
+    shopifyUpdatedAt,
+    syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  await orderRef.set(data, { merge: true });
 }
