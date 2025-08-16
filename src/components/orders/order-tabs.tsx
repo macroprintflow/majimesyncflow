@@ -13,9 +13,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { OrderRowActions } from "./order-row-actions";
 import { format } from "date-fns";
 import type { Timestamp } from "firebase/firestore";
+import { useState } from "react";
 
 const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "New Orders", status: "NEW" },
@@ -54,6 +62,8 @@ function getDisplayOrderNumber(order: Order) {
   return `#${order.id}`;
 }
 
+type SortOrder = "desc" | "asc";
+
 const OrderTable = ({
   orders,
   status,
@@ -61,9 +71,19 @@ const OrderTable = ({
   orders: Order[];
   status: OrderAppStatus;
 }) => {
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const filteredOrders = orders.filter((order) => order.appStatus === status);
 
-  if (filteredOrders.length === 0) {
+  const sortedOrders = [...filteredOrders].sort((a, b) => {
+    const dateA = isFirestoreTimestamp(a.createdAt) ? a.createdAt.toDate().getTime() : 0;
+    const dateB = isFirestoreTimestamp(b.createdAt) ? b.createdAt.toDate().getTime() : 0;
+    if (sortOrder === "desc") {
+      return dateB - dateA;
+    }
+    return dateA - dateB;
+  });
+
+  if (sortedOrders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center mt-4">
         <p className="text-sm text-muted-foreground">No orders in this stage.</p>
@@ -72,56 +92,66 @@ const OrderTable = ({
   }
 
   return (
-    <div className="rounded-lg border mt-4">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Order</TableHead>
-            <TableHead>Customer</TableHead>
-            <TableHead>Date (Shopify)</TableHead>
-            <TableHead>Items</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead>
-              <span className="sr-only">Actions</span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filteredOrders.map((order) => {
-            const humanNumber = getDisplayOrderNumber(order);
+    <>
+      <div className="flex justify-end mt-4">
+          <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Sort by date" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desc">Newest First</SelectItem>
+              <SelectItem value="asc">Oldest First</SelectItem>
+            </SelectContent>
+          </Select>
+      </div>
+      <div className="rounded-lg border mt-4">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Order</TableHead>
+              <TableHead>Customer</TableHead>
+              <TableHead>Date (Shopify)</TableHead>
+              <TableHead>Items</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+              <TableHead>
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedOrders.map((order) => {
+              const humanNumber = getDisplayOrderNumber(order);
 
-            const itemsCount = Array.isArray(order.lineItems)
-              ? order.lineItems.reduce((acc, item) => acc + (item.quantity || 0), 0)
-              : 0;
+              const itemsCount = Array.isArray(order.lineItems)
+                ? order.lineItems.reduce((acc, item) => acc + (item.quantity || 0), 0)
+                : 0;
 
-            // Prefer Shopify's timestamp fields if present; fallback to legacy createdAt
-            const displayTimestamp =
-              order.createdAt;
+              const displayTimestamp = order.createdAt;
+              const currency = order?.totals?.currency || "INR";
+              const totalAmount = Number(order?.totals?.grandTotal || 0);
 
-            const currency = order?.totals?.currency || "INR";
-            const totalAmount = Number(order?.totals?.grandTotal || 0);
-
-            return (
-              <TableRow key={order.id}>
-                <TableCell className="font-medium">{humanNumber}</TableCell>
-                <TableCell>{order.customer?.name || "—"}</TableCell>
-                <TableCell>{formatDate(displayTimestamp)}</TableCell>
-                <TableCell>{itemsCount}</TableCell>
-                <TableCell className="text-right font-semibold">
-                  {new Intl.NumberFormat("en-IN", {
-                    style: "currency",
-                    currency,
-                  }).format(totalAmount)}
-                </TableCell>
-                <TableCell>
-                  <OrderRowActions order={order} />
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+              return (
+                <TableRow key={order.id}>
+                  <TableCell className="font-medium">{humanNumber}</TableCell>
+                  <TableCell>{order.customer?.name || "—"}</TableCell>
+                  <TableCell>{formatDate(displayTimestamp)}</TableCell>
+                  <TableCell>{itemsCount}</TableCell>
+                  <TableCell className="text-right font-semibold">
+                    {new Intl.NumberFormat("en-IN", {
+                      style: "currency",
+                      currency,
+                    }).format(totalAmount)}
+                  </TableCell>
+                  <TableCell>
+                    <OrderRowActions order={order} />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   );
 };
 
