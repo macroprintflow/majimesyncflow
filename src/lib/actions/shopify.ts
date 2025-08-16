@@ -1,6 +1,6 @@
 'use server';
 
-import { writeBatch, collection, getDocs, query, where, serverTimestamp, doc } from 'firebase/firestore';
+import { writeBatch, collection, getDocs, query, where, serverTimestamp, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/firebase';
 import shopify from '@/lib/shopify';
 import type { Order } from '@/lib/types';
@@ -107,5 +107,28 @@ export async function syncShopifyOrders() {
   } catch (error: any) {
     console.error('Error syncing Shopify orders:', error);
     return { success: false, error: error.message || 'Failed to sync orders from Shopify.' };
+  }
+}
+
+export async function clearAllOrders() {
+  try {
+    console.log("Clearing all orders from Firestore...");
+    const ordersCol = collection(db, 'orders');
+    const snapshot = await getDocs(ordersCol);
+    
+    // Firestore does not support batch deletes of more than 500, but it's unlikely to be an issue here.
+    const batch = writeBatch(db);
+    snapshot.docs.forEach(doc => {
+      batch.delete(doc.ref);
+    });
+    
+    await batch.commit();
+    
+    console.log(`${snapshot.size} orders cleared.`);
+    revalidatePath('/dashboard/orders');
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error clearing orders:', error);
+    return { success: false, error: 'Failed to clear orders.' };
   }
 }
