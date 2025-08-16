@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useCollection } from "@/lib/hooks/use-collection";
 import type { Order, OrderAppStatus } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,8 +24,44 @@ const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "Cancelled", status: "CANCELLED" },
 ];
 
-const OrderTable = ({ orders, status }: { orders: Order[]; status: OrderAppStatus }) => {
-  const filteredOrders = orders.filter(order => order.appStatus === status);
+// Type guard for Firestore Timestamp
+function isFirestoreTimestamp(value: any): value is Timestamp {
+  return value && typeof value.toDate === "function";
+}
+
+// Format a Firestore Timestamp (or show em dash if missing)
+function formatDate(ts: any) {
+  if (isFirestoreTimestamp(ts)) {
+    try {
+      return format(ts.toDate(), "PPpp");
+    } catch {
+      // fall through
+    }
+  }
+  return "—";
+}
+
+// Prefer Shopify human order number (order.name like "#1001"),
+// else fall back to the numeric part of shopifyId (e.g., shp-1234567890 → #1234567890),
+// else the Firestore doc id.
+function getDisplayOrderNumber(order: Order) {
+  if ((order as any).name) return (order as any).name as string;
+  if (order.shopifyId) {
+    const raw = order.shopifyId.replace("shp-", "");
+    const cleaned = raw.split("?")[0].split("/").pop() || raw;
+    return `#${cleaned}`;
+  }
+  return `#${order.id}`;
+}
+
+const OrderTable = ({
+  orders,
+  status,
+}: {
+  orders: Order[];
+  status: OrderAppStatus;
+}) => {
+  const filteredOrders = orders.filter((order) => order.appStatus === status);
 
   if (filteredOrders.length === 0) {
     return (
@@ -33,43 +70,55 @@ const OrderTable = ({ orders, status }: { orders: Order[]; status: OrderAppStatu
       </div>
     );
   }
-  
-  const formatDate = (timestamp: Timestamp) => {
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      return format(timestamp.toDate(), 'PPpp');
-    }
-    // Fallback for cases where timestamp might not be a valid object
-    return 'Invalid date';
-  };
 
   return (
     <div className="rounded-lg border mt-4">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Order ID</TableHead>
+            <TableHead>Order</TableHead>
             <TableHead>Customer</TableHead>
-            <TableHead>Date</TableHead>
+            <TableHead>Date (Shopify)</TableHead>
             <TableHead>Items</TableHead>
             <TableHead className="text-right">Total</TableHead>
-            <TableHead><span className="sr-only">Actions</span></TableHead>
+            <TableHead>
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {filteredOrders.map(order => (
-            <TableRow key={order.id}>
-              <TableCell className="font-medium">#{order.shopifyId.replace('shp-','').split('?')[0].split('/').pop()}</TableCell>
-              <TableCell>{order.customer.name}</TableCell>
-              <TableCell>{formatDate(order.createdAt)}</TableCell>
-              <TableCell>{order.lineItems.reduce((acc, item) => acc + item.quantity, 0)}</TableCell>
-              <TableCell className="text-right font-semibold">
-                {new Intl.NumberFormat('en-IN', { style: 'currency', currency: order.totals.currency }).format(order.totals.grandTotal)}
-              </TableCell>
-              <TableCell>
-                <OrderRowActions order={order} />
-              </TableCell>
-            </TableRow>
-          ))}
+          {filteredOrders.map((order) => {
+            const humanNumber = getDisplayOrderNumber(order);
+
+            const itemsCount = Array.isArray(order.lineItems)
+              ? order.lineItems.reduce((acc, item) => acc + (item.quantity || 0), 0)
+              : 0;
+
+            // Prefer Shopify's timestamp fields if present; fallback to legacy createdAt
+            const displayTimestamp =
+              (order as any).shopifyCreatedAt ?? (order as any).createdAt;
+
+            const currency = order?.totals?.currency || "INR";
+            const totalAmount = Number(order?.totals?.grandTotal || 0);
+
+            return (
+              <TableRow key={order.id}>
+                <TableCell className="font-medium">{humanNumber}</TableCell>
+                <TableCell>{order.customer?.name || "—"}</TableCell>
+                <TableCell>{formatDate(displayTimestamp)}</TableCell>
+                <TableCell>{itemsCount}</TableCell>
+                <TableCell className="text-right font-semibold">
+                  {new Intl.NumberFormat("en-IN", {
+                    style: "currency",
+                    currency,
+                  }).format(totalAmount)}
+                </TableCell>
+                <TableCell>
+                  <OrderRowActions order={order} />
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
@@ -83,10 +132,10 @@ const OrderTabs = () => {
     return (
       <div>
         <div className="flex space-x-4 border-b">
-            <Skeleton className="h-10 w-24" />
-            <Skeleton className="h-10 w-24" />
-            <Skeleton className="h-10 w-24" />
-            <Skeleton className="h-10 w-24" />
+          <Skeleton className="h-10 w-24" />
+          <Skeleton className="h-10 w-24" />
+          <Skeleton className="h-10 w-24" />
+          <Skeleton className="h-10 w-24" />
         </div>
         <div className="mt-4 space-y-2">
           <Skeleton className="h-12 w-full" />
@@ -96,10 +145,9 @@ const OrderTabs = () => {
       </div>
     );
   }
-  
-  const getCount = (status: OrderAppStatus) => {
-    return orders.filter(o => o.appStatus === status).length;
-  }
+
+  const getCount = (status: OrderAppStatus) =>
+    orders.filter((o) => o.appStatus === status).length;
 
   return (
     <Tabs defaultValue="NEW" className="w-full">
