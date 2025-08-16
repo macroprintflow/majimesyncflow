@@ -13,17 +13,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { OrderRowActions } from "./order-row-actions";
 import { format } from "date-fns";
 import type { Timestamp } from "firebase/firestore";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { ArrowUpDown } from "lucide-react";
 
 const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "New Orders", status: "NEW" },
@@ -62,7 +57,10 @@ function getDisplayOrderNumber(order: Order) {
   return `#${order.id}`;
 }
 
-type SortOrder = "desc" | "asc";
+type SortConfig = {
+    key: keyof Order | 'customer.name' | 'totals.grandTotal' | 'lineItems';
+    direction: 'asc' | 'desc';
+};
 
 const OrderTable = ({
   orders,
@@ -71,17 +69,55 @@ const OrderTable = ({
   orders: Order[];
   status: OrderAppStatus;
 }) => {
-  const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'createdAt', direction: 'desc' });
   const filteredOrders = orders.filter((order) => order.appStatus === status);
 
-  const sortedOrders = [...filteredOrders].sort((a, b) => {
-    const dateA = isFirestoreTimestamp(a.createdAt) ? a.createdAt.toDate().getTime() : 0;
-    const dateB = isFirestoreTimestamp(b.createdAt) ? b.createdAt.toDate().getTime() : 0;
-    if (sortOrder === "desc") {
-      return dateB - dateA;
+  const requestSort = (key: SortConfig['key']) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
     }
-    return dateA - dateB;
-  });
+    setSortConfig({ key, direction });
+  };
+  
+  const getSortableHeader = (label: string, key: SortConfig['key']) => (
+    <Button variant="ghost" onClick={() => requestSort(key)} className="px-0 hover:bg-transparent">
+        {label}
+        <ArrowUpDown className={`ml-2 h-4 w-4 ${sortConfig.key !== key && 'text-muted-foreground/50'}`} />
+    </Button>
+  );
+
+
+  const sortedOrders = useMemo(() => {
+    const sortableItems = [...filteredOrders];
+    sortableItems.sort((a, b) => {
+        let aValue: any;
+        let bValue: any;
+
+        if (sortConfig.key === 'customer.name') {
+            aValue = a.customer?.name || '';
+            bValue = b.customer?.name || '';
+        } else if (sortConfig.key === 'totals.grandTotal') {
+            aValue = a.totals?.grandTotal || 0;
+            bValue = b.totals?.grandTotal || 0;
+        } else if (sortConfig.key === 'createdAt') {
+            aValue = isFirestoreTimestamp(a.createdAt) ? a.createdAt.toDate().getTime() : 0;
+            bValue = isFirestoreTimestamp(b.createdAt) ? b.createdAt.toDate().getTime() : 0;
+        } else {
+            aValue = a[sortConfig.key as keyof Order] || '';
+            bValue = b[sortConfig.key as keyof Order] || '';
+        }
+
+        if (aValue < bValue) {
+            return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+            return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+    });
+    return sortableItems;
+  }, [filteredOrders, sortConfig]);
 
   if (sortedOrders.length === 0) {
     return (
@@ -93,26 +129,15 @@ const OrderTable = ({
 
   return (
     <>
-      <div className="flex justify-end mt-4">
-          <Select value={sortOrder} onValueChange={(value) => setSortOrder(value as SortOrder)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Sort by date" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="desc">Newest First</SelectItem>
-              <SelectItem value="asc">Oldest First</SelectItem>
-            </SelectContent>
-          </Select>
-      </div>
       <div className="rounded-lg border mt-4">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Order</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Date (Shopify)</TableHead>
+              <TableHead>{getSortableHeader('Order', 'name')}</TableHead>
+              <TableHead>{getSortableHeader('Customer', 'customer.name')}</TableHead>
+              <TableHead>{getSortableHeader('Date (Shopify)', 'createdAt')}</TableHead>
               <TableHead>Items</TableHead>
-              <TableHead className="text-right">Total</TableHead>
+              <TableHead className="text-right">{getSortableHeader('Total', 'totals.grandTotal')}</TableHead>
               <TableHead>
                 <span className="sr-only">Actions</span>
               </TableHead>
