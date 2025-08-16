@@ -2,10 +2,18 @@
 
 import { useCollection } from "@/lib/hooks/use-collection";
 import type { Order, OrderAppStatus } from "@/lib/types";
-import OrderCard from "./order-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { OrderRowActions } from "./order-row-actions";
+import { format } from "date-fns";
 
 const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "New Orders", status: "NEW" },
@@ -14,7 +22,7 @@ const columns: { title: string; status: OrderAppStatus }[] = [
   { title: "Cancelled", status: "CANCELLED" },
 ];
 
-const OrderList = ({ orders, status }: { orders: Order[]; status: OrderAppStatus }) => {
+const OrderTable = ({ orders, status }: { orders: Order[]; status: OrderAppStatus }) => {
   const filteredOrders = orders.filter(order => order.appStatus === status);
 
   if (filteredOrders.length === 0) {
@@ -26,10 +34,35 @@ const OrderList = ({ orders, status }: { orders: Order[]; status: OrderAppStatus
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 mt-4">
-      {filteredOrders.map(order => (
-        <OrderCard key={order.id} order={order} />
-      ))}
+    <div className="rounded-lg border mt-4">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Order ID</TableHead>
+            <TableHead>Customer</TableHead>
+            <TableHead>Date</TableHead>
+            <TableHead>Items</TableHead>
+            <TableHead className="text-right">Total</TableHead>
+            <TableHead><span className="sr-only">Actions</span></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredOrders.map(order => (
+            <TableRow key={order.id}>
+              <TableCell className="font-medium">#{order.shopifyId.replace('shp-', '')}</TableCell>
+              <TableCell>{order.customer.name}</TableCell>
+              <TableCell>{format(order.createdAt.toDate(), 'PPpp')}</TableCell>
+              <TableCell>{order.lineItems.reduce((acc, item) => acc + item.quantity, 0)}</TableCell>
+              <TableCell className="text-right font-semibold">
+                {new Intl.NumberFormat('en-IN', { style: 'currency', currency: order.totals.currency }).format(order.totals.grandTotal)}
+              </TableCell>
+              <TableCell>
+                <OrderRowActions order={order} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 };
@@ -46,10 +79,10 @@ const OrderTabs = () => {
             <Skeleton className="h-10 w-24" />
             <Skeleton className="h-10 w-24" />
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 mt-4">
-          <Skeleton className="h-48 w-full" />
-          <Skeleton className="h-48 w-full" />
-          <Skeleton className="h-48 w-full" />
+        <div className="mt-4 space-y-2">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
         </div>
       </div>
     );
@@ -70,7 +103,7 @@ const OrderTabs = () => {
       </TabsList>
       {columns.map((col) => (
         <TabsContent key={col.status} value={col.status}>
-          <OrderList orders={orders} status={col.status} />
+          <OrderTable orders={orders} status={col.status} />
         </TabsContent>
       ))}
     </Tabs>
