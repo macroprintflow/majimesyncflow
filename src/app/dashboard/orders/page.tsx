@@ -1,4 +1,4 @@
-import OrderKanban from '@/components/orders/order-kanban';
+import OrderTabs from '@/components/orders/order-tabs';
 import type { Metadata } from 'next';
 import { SyncShopifyButton } from '@/components/orders/sync-shopify-button';
 
@@ -22,7 +22,7 @@ export default function OrdersPage() {
         <SyncShopifyButton />
       </div>
       <div className="mt-6 flex-1">
-        <OrderKanban />
+        <OrderTabs />
       </div>
     </div>
   );
