@@ -48,71 +48,14 @@ export async function syncShopifyOrders() {
     }
 
     const batch = writeBatch(db);
-    const ordersCol = collection(db, 'orders');
-
-    // Helper: Shopify API returns either a numeric id or a GID
-    const getNumericId = (idLike: string | number) => {
-      const s = String(idLike);
-      return s.includes('/') ? s.split('/').pop()! : s;
-    };
-
     let upserts = 0;
 
     for (const order of shopifyOrders) {
-      const numericId = getNumericId(order.id);
-      const shopifyId = `shp-${numericId}`;
-      const createdAtTimestamp = order.created_at ? Timestamp.fromDate(new Date(order.created_at)) : serverTimestamp();
-      const updatedAtTimestamp = order.updated_at ? Timestamp.fromDate(new Date(order.updated_at)) : serverTimestamp();
-
-      const newOrder: Omit<Order, 'id'> & { createdAt: any, updatedAt: any } = {
-        shopifyId,
-        name: order.name, // <-- Save the human-readable order number
-        financialStatus: (order.financial_status as any) || 'pending',
-        fulfillmentStatus: (order.fulfillment_status as any) || 'unfulfilled',
-        appStatus: 'NEW',
-        customer: {
-          name: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim(),
-          email: order.customer?.email || '',
-          phone: order.customer?.phone || '',
-        },
-        shippingAddress: {
-          line1: order.shipping_address?.address1 || '',
-          city: order.shipping_address?.city || '',
-          state: order.shipping_address?.province || '',
-          pincode: order.shipping_address?.zip || '',
-          country: order.shipping_address?.country || '',
-        },
-        lineItems: order.line_items.map(li => ({
-          title: li.title,
-          sku: li.sku || '',
-          quantity: li.quantity,
-          price: parseFloat(li.price),
-          shopifyLineItemId: getNumericId(li.id),
-        })),
-        totals: {
-          subtotal: parseFloat(order.subtotal_price || '0'),
-          shipping: parseFloat(order.total_shipping_price_set?.shop_money?.amount || '0'),
-          tax: parseFloat(order.total_tax || '0'),
-          discount: parseFloat(order.total_discounts || '0'),
-          grandTotal: parseFloat(order.total_price || '0'),
-          currency: order.currency || 'INR',
-        },
-        carrier: null,
-        awb: { number: null, labelUrl: null },
-        carrierErrors: [],
-        createdAt: createdAtTimestamp,
-        updatedAt: updatedAtTimestamp,
-      };
-
-      // Use deterministic doc ID = Shopify ID
-      const orderRef = doc(ordersCol, shopifyId);
-
-      // Upsert (merge) so re-syncs update instead of duplicating
-      batch.set(orderRef, newOrder, { merge: true });
+      await processAndSaveOrder(order, batch);
       upserts++;
     }
 
-    if (upserts) {
+    if (upserts > 0) {
       await batch.commit();
       console.log(`${upserts} orders upserted into Firestore.`);
     } else {
@@ -125,4 +68,78 @@ export async function syncShopifyOrders() {
     console.error('Error syncing Shopify orders:', error);
     return { success: false, error: error.message || 'Failed to sync orders from Shopify.' };
   }
+}
+
+
+// Helper: Shopify API returns either a numeric id or a GID
+const getNumericId = (idLike: string | number) => {
+  const s = String(idLike);
+  return s.includes('/') ? s.split('/').pop()! : s;
+};
+
+/**
+ * Processes a Shopify order object and adds it to a Firestore batch operation.
+ * This can be used for both bulk sync and webhooks.
+ * @param order - The Shopify order object.
+ * @param batch - The Firestore write batch to add the operation to.
+ */
+export async function processAndSaveOrder(order: any, batch?: import('firebase/firestore').WriteBatch) {
+    const ordersCol = collection(db, 'orders');
+    const numericId = getNumericId(order.id);
+    const shopifyId = `shp-${numericId}`;
+    const createdAtTimestamp = order.created_at ? Timestamp.fromDate(new Date(order.created_at)) : serverTimestamp();
+    const updatedAtTimestamp = order.updated_at ? Timestamp.fromDate(new Date(order.updated_at)) : serverTimestamp();
+
+    const newOrder: Omit<Order, 'id'> & { createdAt: any, updatedAt: any } = {
+      shopifyId,
+      name: order.name,
+      financialStatus: (order.financial_status as any) || 'pending',
+      fulfillmentStatus: (order.fulfillment_status as any) || 'unfulfilled',
+      appStatus: 'NEW',
+      customer: {
+        name: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim(),
+        email: order.customer?.email || '',
+        phone: order.customer?.phone || '',
+      },
+      shippingAddress: {
+        line1: order.shipping_address?.address1 || '',
+        city: order.shipping_address?.city || '',
+        state: order.shipping_address?.province || '',
+        pincode: order.shipping_address?.zip || '',
+        country: order.shipping_address?.country || '',
+      },
+      lineItems: order.line_items.map((li: any) => ({
+        title: li.title,
+        sku: li.sku || '',
+        quantity: li.quantity,
+        price: parseFloat(li.price),
+        shopifyLineItemId: getNumericId(li.id),
+      })),
+      totals: {
+        subtotal: parseFloat(order.subtotal_price || '0'),
+        shipping: parseFloat(order.total_shipping_price_set?.shop_money?.amount || '0'),
+        tax: parseFloat(order.total_tax || '0'),
+        discount: parseFloat(order.total_discounts || '0'),
+        grandTotal: parseFloat(order.total_price || '0'),
+        currency: order.currency || 'INR',
+      },
+      carrier: null,
+      awb: { number: null, labelUrl: null },
+      carrierErrors: [],
+      createdAt: createdAtTimestamp,
+      updatedAt: updatedAtTimestamp,
+    };
+
+    const orderRef = doc(ordersCol, shopifyId);
+
+    const currentBatch = batch || writeBatch(db);
+    currentBatch.set(orderRef, newOrder, { merge: true });
+
+    // If no batch was provided, we commit it ourselves.
+    if (!batch) {
+        await currentBatch.commit();
+        console.log(`Webhook processed and saved order ${shopifyId}`);
+        // Revalidate path after saving to update UI
+        revalidatePath('/dashboard/orders');
+    }
 }
