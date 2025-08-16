@@ -1,6 +1,6 @@
 'use server';
 
-import { writeBatch, collection, getDocs, query, where, serverTimestamp, doc, deleteDoc } from 'firebase/firestore';
+import { writeBatch, collection, getDocs, query, where, serverTimestamp, doc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/firebase';
 import shopify from '@/lib/shopify';
 import type { Order } from '@/lib/types';
@@ -49,6 +49,9 @@ export async function syncShopifyOrders() {
         return; // Skip if order already exists
       }
 
+      // Convert Shopify's ISO date string to a Firestore Timestamp
+      const createdAtTimestamp = order.created_at ? Timestamp.fromDate(new Date(order.created_at)) : serverTimestamp();
+
       const newOrder: Omit<Order, 'id' | 'createdAt' | 'updatedAt'> = {
         shopifyId: shopifyId,
         financialStatus: order.financial_status as any || 'pending',
@@ -89,7 +92,7 @@ export async function syncShopifyOrders() {
       const newOrderRef = doc(ordersCol);
       batch.set(newOrderRef, {
         ...newOrder,
-        createdAt: serverTimestamp(),
+        createdAt: createdAtTimestamp,
         updatedAt: serverTimestamp(),
       });
       syncedCount++;
